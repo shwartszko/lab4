@@ -41,9 +41,10 @@
 #define DATA 102
 #define PARITY 103
 #define STOP_BITS 104
+#define ERROR 105
 #define SAMPLES_SIZE 3
 #define MASK_MAX 128
-#define TIMES_MAX 4
+#define TIMES_MAX 8
 extern uint32_t to_finish;
 extern uint32_t phy_to_dll_rx_bus;
 extern uint32_t phy_rx_new_data;
@@ -256,11 +257,11 @@ void TIM4_IRQHandler(void)
   HAL_TIM_IRQHandler(&htim4);
   /* USER CODE BEGIN TIM4_IRQn 1 */
 	times++;
-	if(times == TIMES_MAX)
+	if(times == 40)
 	{
 		times = 0;
 	}
-	else 
+	else if(times >= 20 && times <= 22) 
 	{
 		samples[sample_counter] = HAL_GPIO_ReadPin(phy_rx_data_GPIO_Port,phy_rx_data_Pin);
 		sample_counter++;
@@ -287,7 +288,7 @@ void TIM4_IRQHandler(void)
 					}
 					else
 					{
-						//while(1) {} 
+						rx_state = ERROR;
 					}
 					break;
 				case DATA:
@@ -297,7 +298,7 @@ void TIM4_IRQHandler(void)
 						parity_counter++;
 					}
 					rx_mask*=2;
-					if(rx_mask>MASK_MAX)
+					if(rx_mask > MASK_MAX)
 					{
 						rx_state = PARITY;
 					}
@@ -310,7 +311,7 @@ void TIM4_IRQHandler(void)
 					}
 					else
 					{
-						//while(1){}
+						rx_state = ERROR;
 					}
 					break;
 				case STOP_BITS:
@@ -318,15 +319,45 @@ void TIM4_IRQHandler(void)
 						stop_bits_counter++;
 					else if(bit == 0 && stop_bits_counter<2)
 					{
-						//while(1) {}
+						rx_state = ERROR;
 					}
 					if(stop_bits_counter == 2)
 					{
-						rx_state = IDLE;
+						times = 0;
+						rx_state = START_BIT;
 						phy_to_dll_rx_bus = input;
-						rx_mask = to_finish = phy_rx_new_data = 1;
-						stop_bits_counter = input = sample_counter = parity_counter = 0;
+						rx_mask = 1;
+						to_finish = 1;
+						phy_rx_new_data = 1;
+						stop_bits_counter =0; 
+						input = 0;
+						sample_counter = 0;
+						parity_counter = 0;
 					}	
+					break;
+				case ERROR:
+					if(rx_mask <= MASK_MAX)
+					{
+						rx_mask *=2;
+					}
+					else
+					{
+						if(stop_bits_counter < 3)
+						{
+							stop_bits_counter++;
+						}
+						else
+						{
+							times = 0;
+							rx_state = START_BIT;
+							rx_mask = 1;
+							to_finish = 1;
+							stop_bits_counter =0; 
+							input = 0;
+							sample_counter = 0;
+							parity_counter = 0;
+						}
+					}
 					break;
 			}
 		}

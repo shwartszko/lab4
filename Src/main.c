@@ -160,7 +160,7 @@ void phy_TX()
 		HAL_TIM_Base_Start_IT(&htim3);
 		HAL_GPIO_WritePin(phy_tx_busy_GPIO_Port,phy_tx_busy_Pin,GPIO_PIN_SET);
 		phy_busy = 1;
-		tx_state = 101;
+		tx_state = START_BIT;
 		dll_new_data = 0;
 	}
 	else if(!prev_tx_clock && tx_clock) //rising edge
@@ -173,7 +173,7 @@ void phy_TX()
 		else if(tx_state == START_BIT)
 		{
 			HAL_GPIO_WritePin(phy_tx_data_GPIO_Port,phy_tx_data_Pin,GPIO_PIN_RESET);
-			tx_bit = 4;
+			tx_bit = 0;
 			tx_state = DATA;
 		}
 		else if(tx_state == DATA)
@@ -197,12 +197,14 @@ void phy_TX()
 		{
 			if(tx_parity_counter%2 == 0)
 			{
+				tx_parity_counter = 0;
 				HAL_GPIO_WritePin(phy_tx_data_GPIO_Port,phy_tx_data_Pin,GPIO_PIN_RESET);
-				tx_bit = 2;
+				tx_bit = 0;
 			}
 			else
 			{
-				tx_bit = 2;
+				tx_parity_counter = 1;
+				tx_bit = 1;
 				HAL_GPIO_WritePin(phy_tx_data_GPIO_Port,phy_tx_data_Pin,GPIO_PIN_SET);
 			}
 			tx_state = STOP_BITS;
@@ -212,7 +214,7 @@ void phy_TX()
 			if(stop_bits < 2)
 			{
 				HAL_GPIO_WritePin(phy_tx_data_GPIO_Port,phy_tx_data_Pin,GPIO_PIN_SET);
-				tx_bit = 3;
+				tx_bit = 1;
 				stop_bits++;
 			}
 			else
@@ -227,6 +229,7 @@ void phy_TX()
 				tx_mask = 1;
 				tx_state = IDLE;
 				counter = 0;
+				tx_parity_counter = 0;
 			}
 		}
 	}
@@ -305,14 +308,14 @@ void phy_RX()
 	rx_state = HAL_GPIO_ReadPin(phy_rx_data_GPIO_Port,phy_rx_data_Pin);
 	if(!rx_state && !timer_on) //voltage drop
 	{
-		//HAL_TIM_Base_Start(&htim4);
-		//HAL_TIM_Base_Start_IT(&htim4);
+		HAL_TIM_Base_Start(&htim4);
+		HAL_TIM_Base_Start_IT(&htim4);
 		timer_on=1;
 	}
 	if(to_finish) //finished receiving frame or an error has occurred 
 	{
-		//HAL_TIM_Base_Stop(&htim4);
-		//HAL_TIM_Base_Stop_IT(&htim4);
+		HAL_TIM_Base_Stop(&htim4);
+		HAL_TIM_Base_Stop_IT(&htim4);
 		timer_on = 0;
 		to_finish = 0;
 	}
@@ -462,9 +465,9 @@ static void MX_TIM2_Init(void)
   TIM_MasterConfigTypeDef sMasterConfig;
 
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 1249;
+  htim2.Init.Prescaler = 124;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 4;
+  htim2.Init.Period = 40;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -495,9 +498,9 @@ static void MX_TIM3_Init(void)
   TIM_MasterConfigTypeDef sMasterConfig;
 
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 1249;
+  htim3.Init.Prescaler = 124;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 4;
+  htim3.Init.Period = 40;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
@@ -528,7 +531,7 @@ static void MX_TIM4_Init(void)
   TIM_MasterConfigTypeDef sMasterConfig;
 
   htim4.Instance = TIM4;
-  htim4.Init.Prescaler = 1249;
+  htim4.Init.Prescaler = 124;
   htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim4.Init.Period = 1;
   htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
