@@ -41,10 +41,24 @@
 #define DATA 102
 #define PARITY 103
 #define STOP_BITS 104
+#define SAMPLES_SIZE 3
+#define MASK_MAX 128
+#define TIMES_MAX 4
 extern uint32_t to_finish;
 extern uint32_t phy_to_dll_rx_bus;
-extern uint8_t phy_rx_new_data;
+extern uint32_t phy_rx_new_data;
+extern uint32_t counter;
+extern uint32_t tx_clock;
 
+static uint32_t times = 0;
+static uint32_t rx_state = START_BIT;
+static uint32_t sample_counter = 0;
+static uint32_t stop_bits_counter = 0;
+static uint32_t bit = -1;
+static uint32_t samples_sum = 0;
+static uint32_t rx_mask = 1;
+static uint32_t input = 0;
+static uint32_t parity_counter = 0;
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
@@ -223,6 +237,7 @@ void TIM3_IRQHandler(void)
 {
   /* USER CODE BEGIN TIM3_IRQn 0 */
 	HAL_GPIO_TogglePin(tx_clock_out_GPIO_Port,tx_clock_out_Pin);
+	counter++;
   /* USER CODE END TIM3_IRQn 0 */
   HAL_TIM_IRQHandler(&htim3);
   /* USER CODE BEGIN TIM3_IRQn 1 */
@@ -236,21 +251,12 @@ void TIM3_IRQHandler(void)
 void TIM4_IRQHandler(void)
 {
   /* USER CODE BEGIN TIM4_IRQn 0 */
-		static uint32_t times = 0;
-		static uint32_t rx_state = START_BIT;
-		static uint32_t samples[3] = {0};
-		static uint32_t sample_counter = 0;
-		static uint32_t stop_bits_counter = 0; //ho kayam !!!!!
-		static uint32_t bit = -1;
-		static uint32_t samples_sum = 0;
-		static uint32_t mask = 1;
-		static uint32_t input = 0;
-		static uint32_t parity_counter = 0;
+	static uint32_t samples[SAMPLES_SIZE] = {0};
   /* USER CODE END TIM4_IRQn 0 */
   HAL_TIM_IRQHandler(&htim4);
   /* USER CODE BEGIN TIM4_IRQn 1 */
 	times++;
-	if(times == 4)
+	if(times == TIMES_MAX)
 	{
 		times = 0;
 	}
@@ -258,11 +264,11 @@ void TIM4_IRQHandler(void)
 	{
 		samples[sample_counter] = HAL_GPIO_ReadPin(phy_rx_data_GPIO_Port,phy_rx_data_Pin);
 		sample_counter++;
-		if(sample_counter == 3)
+		if(sample_counter == SAMPLES_SIZE)
 		{
 			sample_counter = 0;
 			samples_sum = samples[0] + samples[1] + samples[2];
-			if(samples_sum < 2) 
+			if(samples_sum < 2)
 			{
 				bit = 0;
 			}
@@ -276,23 +282,22 @@ void TIM4_IRQHandler(void)
 					if(bit == 0)
 					{
 						rx_state = DATA;
-						mask=1;
+						rx_mask=1;
+						input = 0;
 					}
 					else
 					{
-						while(1) //error
-						{
-						}
+						//while(1) {} 
 					}
 					break;
 				case DATA:
 					if(bit == 1)
 					{
-						input+=mask;
+						input+=rx_mask;
 						parity_counter++;
 					}
-					mask*=2;
-					if(mask>128)
+					rx_mask*=2;
+					if(rx_mask>MASK_MAX)
 					{
 						rx_state = PARITY;
 					}
@@ -305,7 +310,7 @@ void TIM4_IRQHandler(void)
 					}
 					else
 					{
-						while(1){}
+						//while(1){}
 					}
 					break;
 				case STOP_BITS:
@@ -313,13 +318,13 @@ void TIM4_IRQHandler(void)
 						stop_bits_counter++;
 					else if(bit == 0 && stop_bits_counter<2)
 					{
-						while(1) {}
+						//while(1) {}
 					}
 					if(stop_bits_counter == 2)
 					{
 						rx_state = IDLE;
 						phy_to_dll_rx_bus = input;
-						mask = to_finish = phy_rx_new_data = 1;
+						rx_mask = to_finish = phy_rx_new_data = 1;
 						stop_bits_counter = input = sample_counter = parity_counter = 0;
 					}	
 					break;

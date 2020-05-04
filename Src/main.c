@@ -41,7 +41,7 @@
 #include "stm32f1xx_hal.h"
 
 /* USER CODE BEGIN Includes */
-#define MASK_MAX 256
+#define MASK_MAX 128
 #define BYTE_COUNT 8
 #define GPIOA_IDR 0x40010808
 #define GPIOB_ODR 0x40010C0C
@@ -63,23 +63,27 @@ uint32_t phy_to_dll_rx_bus = 0;
 static uint32_t dll_to_phy_tx_bus;
 static uint32_t dll_to_phy_tx_bus_valid = 0;
 static uint32_t phy_to_dll_rx_bus_valid = 0;
-uint8_t dll_new_data = 0;
-uint8_t phy_rx_new_data = 0;
+uint32_t dll_new_data = 0;
+uint32_t phy_rx_new_data = 0;
 uint32_t to_finish = 0;
 
-static uint32_t phy_tx_data_value = 0;
-static uint32_t phy_rx_data_value = 0;
-static uint32_t tx_clock = 0;
-static uint32_t phy_rx_clock = 0;
+uint32_t tx_clock = 0;
 static uint32_t interface_clock = 0;
 uint32_t prev_tx_clock = 0;
-uint32_t prev_rx_clock = 0;
 uint32_t prev_interface_clock = 0;
-uint8_t output_data = 0;
 
 static uint32_t alive = 0;
 static uint32_t phy_busy = 0;
 
+//lab4
+static uint32_t tx_state = IDLE;
+static uint32_t tx_mask = 1;
+static uint32_t current_bit = -1;
+static uint32_t stop_bits = 0;
+static uint32_t tx_parity_counter = 0;
+static uint32_t first_iteration = 1;
+static uint32_t tx_bit = 1;
+uint32_t counter = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -98,6 +102,7 @@ static void MX_NVIC_Init(void);
 /* USER CODE BEGIN 0 */
 void interface()
 {
+	
 	static int first_rising_edge = 1;
 	static int first_iteration = 1;
 	static uint32_t *GPIOA_IDR_PTR = (uint32_t*)GPIOA_IDR;
@@ -140,54 +145,131 @@ void interface()
 
 void phy_TX()
 {
-	static uint32_t tx_state = IDLE;
-	static uint32_t mask = 1;
-	static uint32_t current_bit = -1;
-	static uint32_t stop_bits = 0;
-	static uint32_t tx_parity_counter = 0;
-	static uint32_t first_iteration = 1;
+	
 	if(first_iteration)
 	{							
 		HAL_GPIO_WritePin(phy_tx_data_GPIO_Port,phy_tx_data_Pin,GPIO_PIN_SET); //send IDLE
+		HAL_GPIO_WritePin(tx_clock_out_GPIO_Port,tx_clock_out_Pin, GPIO_PIN_RESET);
+		tx_bit = 1;
 		first_iteration = 0;
 	}
 	if(dll_new_data)
 	{
+		counter = 0;
 		HAL_TIM_Base_Start(&htim3);
 		HAL_TIM_Base_Start_IT(&htim3);
 		HAL_GPIO_WritePin(phy_tx_busy_GPIO_Port,phy_tx_busy_Pin,GPIO_PIN_SET);
-		tx_state = START_BIT;
+		phy_busy = 1;
+		tx_state = 101;
 		dll_new_data = 0;
 	}
 	if(!prev_tx_clock && tx_clock) //rising edge
 	{
+		if(tx_state == IDLE)
+		{
+			HAL_GPIO_WritePin(phy_tx_data_GPIO_Port,phy_tx_data_Pin,GPIO_PIN_SET);
+			tx_bit = 1;
+		}
+		else if(tx_state == START_BIT)
+		{
+			HAL_GPIO_WritePin(phy_tx_data_GPIO_Port,phy_tx_data_Pin,GPIO_PIN_RESET);
+			tx_bit = 0;
+			tx_state = DATA;
+		}
+		else if(tx_state == DATA)
+		{
+			current_bit = (tx_mask)&(dll_to_phy_tx_bus);
+			if(current_bit==tx_mask) 
+			{
+				HAL_GPIO_WritePin(phy_tx_data_GPIO_Port,phy_tx_data_Pin,GPIO_PIN_SET);
+				tx_parity_counter++;
+				tx_bit = 1;
+			}
+			else
+			{
+				tx_bit = 0;
+				HAL_GPIO_WritePin(phy_tx_data_GPIO_Port,phy_tx_data_Pin,GPIO_PIN_RESET);
+			}
+			tx_mask*=2;
+			tx_state = (tx_mask > MASK_MAX) ? PARITY : DATA;
+		}
+		else if(tx_state == PARITY)
+		{
+			if(tx_parity_counter%2 == 0)
+			{
+				HAL_GPIO_WritePin(phy_tx_data_GPIO_Port,phy_tx_data_Pin,GPIO_PIN_RESET);
+				tx_bit = 0;
+			}
+			else
+			{
+				tx_bit = 1;
+				HAL_GPIO_WritePin(phy_tx_data_GPIO_Port,phy_tx_data_Pin,GPIO_PIN_SET);
+			}
+			tx_state = STOP_BITS;
+		}
+		else if(tx_state == STOP_BITS)
+		{
+			if(stop_bits < 2)
+			{
+				HAL_GPIO_WritePin(phy_tx_data_GPIO_Port,phy_tx_data_Pin,GPIO_PIN_SET);
+				tx_bit = 1;
+				stop_bits++;
+			}
+			else
+			{
+				HAL_TIM_Base_Stop(&htim3);
+				HAL_TIM_Base_Stop_IT(&htim3);
+				HAL_GPIO_WritePin(phy_tx_busy_GPIO_Port,phy_tx_busy_Pin,GPIO_PIN_RESET);
+				HAL_GPIO_WritePin(tx_clock_out_GPIO_Port,tx_clock_out_Pin,GPIO_PIN_RESET);
+				phy_busy = 0;
+				tx_mask = 1;
+				tx_state = IDLE;
+				counter = 0;
+			}
+		}
+	}
+		
+		
+		
+		
+		
+		/*
 		switch (tx_state)
 		{
+			case IDLE:
+				HAL_GPIO_WritePin(phy_tx_data_GPIO_Port,phy_tx_data_Pin,GPIO_PIN_SET);
+				tx_bit = 1;
+				break;
 			case START_BIT:
 				HAL_GPIO_WritePin(phy_tx_data_GPIO_Port,phy_tx_data_Pin,GPIO_PIN_RESET);
+				tx_bit = 0;
 				tx_state = DATA;
 				break;
 			case DATA:
-				current_bit = mask & (dll_to_phy_tx_bus);
-				if(current_bit==mask) 
+				current_bit = (tx_mask)&(dll_to_phy_tx_bus);
+				if(current_bit==tx_mask) 
 				{
 					HAL_GPIO_WritePin(phy_tx_data_GPIO_Port,phy_tx_data_Pin,GPIO_PIN_SET);
 					tx_parity_counter++;
+					tx_bit = 1;
 				}
 				else
 				{
+					tx_bit = 0;
 					HAL_GPIO_WritePin(phy_tx_data_GPIO_Port,phy_tx_data_Pin,GPIO_PIN_RESET);
 				}
-				mask*=2;
-				tx_state = (mask > 128) ? PARITY : DATA;
+				tx_mask*=2;
+				tx_state = (tx_mask > MASK_MAX) ? PARITY : DATA;
 				break;
 			case PARITY:
 				if(tx_parity_counter%2 == 0)
 				{
 					HAL_GPIO_WritePin(phy_tx_data_GPIO_Port,phy_tx_data_Pin,GPIO_PIN_RESET);
+					tx_bit = 0;
 				}
 				else
 				{
+					tx_bit = 1;
 					HAL_GPIO_WritePin(phy_tx_data_GPIO_Port,phy_tx_data_Pin,GPIO_PIN_SET);
 				}
 				tx_state = STOP_BITS;
@@ -196,6 +278,7 @@ void phy_TX()
 				if(stop_bits < 2)
 				{
 					HAL_GPIO_WritePin(phy_tx_data_GPIO_Port,phy_tx_data_Pin,GPIO_PIN_SET);
+					tx_bit = 1;
 					stop_bits++;
 				}
 				else
@@ -203,12 +286,15 @@ void phy_TX()
 					HAL_TIM_Base_Stop(&htim3);
 					HAL_TIM_Base_Stop_IT(&htim3);
 					HAL_GPIO_WritePin(phy_tx_busy_GPIO_Port,phy_tx_busy_Pin,GPIO_PIN_RESET);
-					mask = 1;
+					HAL_GPIO_WritePin(tx_clock_out_GPIO_Port,tx_clock_out_Pin,GPIO_PIN_RESET);
+					phy_busy = 0;
+					tx_mask = 1;
 					tx_state = IDLE;
+					counter = 0;
 				}
 				break;
 		}
-	}	
+	*/
 }
 void phy_RX()
 {
@@ -222,21 +308,19 @@ void phy_RX()
 		timer_on=1;
 	}
 	if(to_finish) //finished receiving frame or an error has occurred 
-		{
-			HAL_TIM_Base_Stop(&htim4);
-			HAL_TIM_Base_Stop_IT(&htim4);
-			timer_on = 0;
-			to_finish = 0;
-		}
+	{
+		HAL_TIM_Base_Stop(&htim4);
+		HAL_TIM_Base_Stop_IT(&htim4);
+		timer_on = 0;
+		to_finish = 0;
+	}
 }
 
 void sampleClocks()
 {
 	prev_tx_clock = tx_clock;
-	prev_rx_clock = phy_rx_clock;
 	prev_interface_clock = interface_clock;
 	tx_clock = HAL_GPIO_ReadPin(tx_clock_in_GPIO_Port,tx_clock_in_Pin);
-	//phy_rx_clock = HAL_GPIO_ReadPin(phy_rx_clock_GPIO_Port,phy_rx_clock_Pin);
 	interface_clock = HAL_GPIO_ReadPin(interface_clock_GPIO_Port,interface_clock_Pin);
 	dll_to_phy_tx_bus_valid = HAL_GPIO_ReadPin(dll_to_phy_tx_bus_valid_GPIO_Port, dll_to_phy_tx_bus_valid_Pin);
 	phy_to_dll_rx_bus_valid = HAL_GPIO_ReadPin(phy_to_dll_rx_bus_valid_GPIO_Port, phy_to_dll_rx_bus_valid_Pin);
@@ -244,8 +328,8 @@ void sampleClocks()
 
 void phy_layer()
 {
-//	phy_TX();
-//	phy_RX();
+	phy_TX();
+	phy_RX();
 }
 /* USER CODE END 0 */
 
@@ -292,7 +376,9 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-
+		phy_layer();
+		interface();
+		sampleClocks();
   /* USER CODE END WHILE */
 
   /* USER CODE BEGIN 3 */
@@ -407,9 +493,9 @@ static void MX_TIM3_Init(void)
   TIM_MasterConfigTypeDef sMasterConfig;
 
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 4999;
+  htim3.Init.Prescaler = 1249;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 1;
+  htim3.Init.Period = 4;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
